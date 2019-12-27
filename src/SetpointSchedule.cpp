@@ -1,5 +1,6 @@
 #include "SetpointSchedule.h"
 #include <float.h>
+const float DefaultSetpoint = 16.0;
 
 //---------------------------------------------------------------------------
 SetpointSchedule::SetpointSchedule(const ScheduleType type, const SlotTypes slotsPerHour) : m_scheduleType(type),
@@ -17,23 +18,44 @@ SetpointSchedule::~SetpointSchedule()
 void SetpointSchedule::generateSchedule(const SlotTypes slotsPerHour)
 {
     m_daySchedule = new DaySchedule();
+    m_daySchedule->Day = DaysOfTheWeek_Monday;
+    m_daySchedule->Hours = generate24h(slotsPerHour);
+    m_daySchedule->SlotsPerHour = slotsPerHour;
 
     switch (m_scheduleType)
     {
     case ScheduleType_1Day:
-        // Link the list to the start
+    {
+        // Link the list to the start - every day is the same
         m_daySchedule->next = m_daySchedule;
-        break;
+    }
+    break;
 
     case ScheduleType_WeekdayWeekend:
-        break;
+    {
+        // Need two 'days' - [Monday-Friday] and [Saturday-Sunday]
+        m_daySchedule->next = new DaySchedule();
+        m_daySchedule->next->SlotsPerHour = slotsPerHour;
+        m_daySchedule->next->Hours = generate24h(slotsPerHour);
+        m_daySchedule->next->next = m_daySchedule;
+    }
+    break;
 
     case ScheduleType_7Day:
-        break;
+    {
+        // Generate the other 6 days
+        DaySchedule *day = m_daySchedule;
+        for (int i = 0; i < 6; i++)
+        {
+            day->next = new DaySchedule();
+            day->next->Day = DaysOfTheWeek((int)DaysOfTheWeek_Tuesday + i);
+            day->next->SlotsPerHour = slotsPerHour;
+            day->next->Hours = generate24h(slotsPerHour);
 
-    default:
-        // Disaster!
-        break;
+            day = day->next;
+        }
+    }
+    break;
     }
 }
 
@@ -55,43 +77,18 @@ float SetpointSchedule::getActiveSetpoint(DaysOfTheWeek day, int hours, int minu
 {
     if (m_daySchedule)
     {
-        DaySchedule *days = m_daySchedule;
-
-        switch (m_scheduleType)
-        {
-        case ScheduleType_7Day:
-            // Find the day in the list:
-            while (days->Day != day)
-            {
-                days = days->next;
-            }
-            break;
-
-        case ScheduleType_WeekdayWeekend:
-            // Find either the first or second day depending which list 'day' is in:
-            if (!isWeekday(day))
-            {
-                days = days->next;
-            }
-            break;
-
-        case ScheduleType_1Day:
-        default:
-            // Use the first day - do nothing
-            break;
-        }
-
-        // Now we have the right day, find the right hour:
+        struct ScheduleSetpoint *theSetpoint = findSetpoint(day, hours, minutes);
+        return theSetpoint->SetPoint;
     }
     else
     {
-        // Whoops - no days yet
+        // Whoops - no days yet!!
         return 0.0;
     }
 }
 
 //---------------------------------------------------------------------------
-ScheduleSetpoint* SetpointSchedule::findSetpoint(const DaysOfTheWeek day, const unsigned int hours, const unsigned int minutes)
+ScheduleSetpoint *SetpointSchedule::findSetpoint(const DaysOfTheWeek day, const unsigned int hours, const unsigned int minutes)
 {
     ScheduleSetpoint *retVal = 0x0;
     DaySchedule *days = m_daySchedule;
@@ -185,4 +182,45 @@ void SetpointSchedule::setSetpointInSchedule(DaysOfTheWeek day, int hours, int m
     {
         // Whoops - no days yet!!
     }
+}
+
+//---------------------------------------------------------------------------
+HourSchedule *SetpointSchedule::generate24h(const SlotTypes slotsPerHour)
+{
+    HourSchedule *rootHours = new HourSchedule();
+    rootHours->HourIndex = 0;
+    rootHours->Schedules = generateSlots(slotsPerHour);
+
+    HourSchedule *hours = rootHours;
+    for (int i = 1; i < 24; i++)
+    {
+        hours->next = new HourSchedule();
+        hours->next->HourIndex = i;
+        hours->next->Schedules = generateSlots(slotsPerHour);
+
+        hours = hours->next;
+    }
+    hours->next = rootHours;
+    return rootHours;
+}
+
+ScheduleSetpoint *SetpointSchedule::generateSlots(const SlotTypes slotsPerHour)
+{
+    // Convert the enum into an iterator
+    int slots = (int)slotsPerHour + 1;
+    ScheduleSetpoint *rootPoint = new ScheduleSetpoint();
+    rootPoint->setpointIndex = 0;
+    rootPoint->SetPoint = DefaultSetpoint;
+
+    ScheduleSetpoint *point = rootPoint;
+    for (int i = 0; i < slots; i++)
+    {
+        point->next = new ScheduleSetpoint();
+        point->next->setpointIndex = i;
+        point->next->SetPoint = DefaultSetpoint;
+
+        point = point->next;
+    }
+
+    return rootPoint;
 }
